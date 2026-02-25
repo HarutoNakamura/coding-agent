@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coding Agent</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2d3152;
+    --accent: #6c8bff;
+    --accent2: #a78bfa;
+    --success: #34d399;
+    --warn: #fbbf24;
+    --error: #f87171;
+    --text: #e2e8f0;
+    --muted: #6b7280;
+    --code-bg: #0d1117;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
+  #status-bar { display: flex; gap: 12px; margin-left: auto; flex-wrap: wrap; }
+  .badge {
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid;
+  }
+  .badge.ok    { color: var(--success); border-color: var(--success); background: #064e3b22; }
+  .badge.warn  { color: var(--warn);    border-color: var(--warn);    background: #78350f22; }
+  .badge.error { color: var(--error);   border-color: var(--error);   background: #7f1d1d22; }
+
+  main {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    height: calc(100vh - 53px);
+  }
+
+  /* Sidebar */
+  aside {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .scan-row { display: flex; gap: 6px; }
+  input[type="text"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 7px 10px;
+    font-size: 13px;
+    width: 100%;
+    outline: none;
+    transition: border 0.2s;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  button {
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 14px;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  #file-tree {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  #mask-log { display: flex; flex-direction: column; gap: 4px; }
+  .mask-entry {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+  }
+  .mask-token { color: var(--warn); }
+  .mask-pattern { color: var(--muted); }
+
+  /* Main content */
+  .content {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0 16px;
+  }
+  .tab {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab-panel { display: none; flex: 1; overflow: hidden; }
+  .tab-panel.active { display: flex; flex-direction: column; }
+
+  /* Query panel */
+  .query-area {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  textarea {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    flex: 1;
+    font-family: inherit;
+    font-size: 13px;
+    min-height: 60px;
+    max-height: 160px;
+    outline: none;
+    padding: 8px 10px;
+    resize: vertical;
+    transition: border 0.2s;
+  }
+  textarea:focus { border-color: var(--accent); }
+  .query-buttons { display: flex; flex-direction: column; gap: 6px; }
+
+  #response-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  .message {
+    margin-bottom: 16px;
+    border-radius: 8px;
+    padding: 12px 16px;
+    line-height: 1.6;
+  }
+  .message.user {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+  }
+  .message.assistant {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--success);
+  }
+  .message .role {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .message .meta {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    gap: 12px;
+  }
+
+  /* Preview panel */
+  #preview-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .preview-stats {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .stat-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .stat-chip span { color: var(--accent); font-weight: 700; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: #c9d1d9;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-x: auto;
+    padding: 16px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty-state {
+    color: var(--muted);
+    text-align: center;
+    margin-top: 40px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⬡ Coding Agent</h1>
+  <div id="status-bar">
+    <span id="badge-project" class="badge warn">No project</span>
+    <span id="badge-ollama"  class="badge warn">Ollama: checking...</span>
+    <span id="badge-cloud"   class="badge warn">Cloud: checking...</span>
+  </div>
+</header>
+
+<main>
+  <!-- Sidebar -->
+  <aside>
+    <div>
+      <div class="panel-title">Project</div>
+      <div class="scan-row">
+        <input type="text" id="scan-path" placeholder="./  or  /path/to/project" value="./">
+        <button id="btn-scan">Scan</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-title">File Tree</div>
+      <div id="file-tree"><span style="color:var(--muted)">Not scanned yet</span></div>
+    </div>
+
+    <div>
+      <div class="panel-title">Masking Log (<span id="mask-count">0</span>)</div>
+      <div id="mask-log"><span style="color:var(--muted);font-size:11px">No masked items</span></div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="content">
+    <div class="tabs">
+      <div class="tab active" data-tab="query">Chat</div>
+      <div class="tab" data-tab="preview">Prompt Preview</div>
+    </div>
+
+    <!-- Chat tab -->
+    <div class="tab-panel active" id="tab-query">
+      <div class="query-area">
+        <textarea id="query-input" placeholder="質問を入力... (Shift+Enter で送信)"></textarea>
+        <div class="query-buttons">
+          <button id="btn-send">Send</button>
+          <button id="btn-preview-only" class="secondary">Preview</button>
+        </div>
+      </div>
+      <div id="response-area">
+        <div class="empty-state">プロジェクトをスキャンして質問を入力してください</div>
+      </div>
+    </div>
+
+    <!-- Preview tab -->
+    <div class="tab-panel" id="tab-preview">
+      <div id="preview-area">
+        <div class="empty-state">「Preview」ボタンを押すとマスク済みプロンプトを表示します</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = '';  // same origin
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// Shift+Enter to send
+document.getElementById('query-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('btn-send').click();
+  }
+});
+
+async function fetchStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    setBadge('badge-project', d.project_loaded ? 'ok' : 'warn',
+      d.project_loaded ? 'Project loaded' : 'No project');
+    setBadge('badge-ollama', d.local_llm_available ? 'ok' : 'warn',
+      d.local_llm_available ? `Ollama: ${d.model?.split(':')[0] ?? 'ok'}` : 'Ollama: off');
+    setBadge('badge-cloud', d.cloud_llm_configured ? 'ok' : 'error',
+      d.cloud_llm_configured ? `${d.provider}` : 'No API key');
+  } catch (e) {
+    setBadge('badge-project', 'error', 'Server error');
+  }
+}
+
+function setBadge(id, cls, text) {
+  const el = document.getElementById(id);
+  el.className = `badge ${cls}`;
+  el.textContent = text;
+}
+
+document.getElementById('btn-scan').addEventListener('click', async () => {
+  const path = document.getElementById('scan-path').value.trim();
+  const btn = document.getElementById('btn-scan');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Scanning...';
+  try {
+    const r = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      alert('Scan error: ' + err.detail);
+      return;
+    }
+    // Update file tree
+    const proj = await fetch('/api/project').then(r => r.json());
+    document.getElementById('file-tree').textContent = proj.file_tree;
+    setBadge('badge-project', 'ok', `${proj.total_files} files`);
+    updateMaskLog();
+    fetchStatus();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Scan';
+  }
+});
+
+document.getElementById('btn-send').addEventListener('click', () => sendQuery(true));
+document.getElementById('btn-preview-only').addEventListener('click', () => sendQuery(false));
+
+async function sendQuery(sendToCloud) {
+  const query = document.getElementById('query-input').value.trim();
+  if (!query) return;
+
+  const area = document.getElementById('response-area');
+  const emptyState = area.querySelector('.empty-state');
+  if (emptyState) emptyState.remove();
+
+  // Add user message
+  const userMsg = document.createElement('div');
+  userMsg.className = 'message user';
+  userMsg.innerHTML = `<div class="role">You</div>${escapeHtml(query)}`;
+  area.appendChild(userMsg);
+
+  // Loading
+  const loadMsg = document.createElement('div');
+  loadMsg.className = 'message assistant';
+  loadMsg.innerHTML = `<div class="role">Agent</div><span class="spinner"></span> Thinking...`;
+  area.appendChild(loadMsg);
+  area.scrollTop = area.scrollHeight;
+
+  const btn = document.getElementById('btn-send');
+  btn.disabled = true;
+
+  try {
+    const r = await fetch('/api/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, send_to_cloud: sendToCloud }),
+    });
+
+    if (!r.ok) {
+      const err = await r.json();
+      loadMsg.innerHTML = `<div class="role">Error</div>${escapeHtml(err.detail)}`;
+      loadMsg.style.borderLeftColor = 'var(--error)';
+      return;
+    }
+
+    const d = await r.json();
+    let meta = `Tokens: ${d.estimated_tokens} · Files: ${d.files_included} · Masked: ${d.masking_count}`;
+    if (d.cost_estimate) meta += ` · Cost: $${d.cost_estimate.estimated_usd}`;
+    if (d.local_llm_used) meta += ' · Ollama ✓';
+
+    loadMsg.innerHTML = `
+      <div class="role">Agent</div>
+      <div style="white-space: pre-wrap;">${escapeHtml(d.response)}</div>
+      <div class="meta">${meta}</div>
+    `;
+    document.getElementById('query-input').value = '';
+    updateMaskLog();
+  } catch(e) {
+    loadMsg.innerHTML = `<div class="role">Error</div>${escapeHtml(e.message)}`;
+  } finally {
+    btn.disabled = false;
+    area.scrollTop = area.scrollHeight;
+  }
+}
+
+document.getElementById('btn-preview-only').addEventListener('click', async () => {
+  const query = document.getElementById('query-input').value.trim() || 'プロジェクトの概要を教えてください';
+  // Switch to preview tab
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="preview"]').classList.add('active');
+  document.getElementById('tab-preview').classList.add('active');
+
+  const area = document.getElementById('preview-area');
+  area.innerHTML = '<span class="spinner"></span> Generating preview...';
+
+  try {
+    const r = await fetch('/api/preview?' + new URLSearchParams({ query }));
+    if (!r.ok) { const e = await r.json(); area.textContent = 'Error: ' + e.detail; return; }
+    const d = await r.json();
+    area.innerHTML = `
+      <div class="preview-stats">
+        <div class="stat-chip">Tokens: <span>${d.estimated_tokens}</span></div>
+        <div class="stat-chip">Files: <span>${d.files_included}</span></div>
+        <div class="stat-chip">Truncated: <span>${d.files_truncated}</span></div>
+        <div class="stat-chip">Masked: <span>${d.masking_log.length}</span></div>
+      </div>
+      <div class="panel-title">Masked Prompt Preview</div>
+      <pre>${escapeHtml(d.masked_prompt)}</pre>
+    `;
+    updateMaskLog();
+  } catch(e) {
+    area.textContent = 'Error: ' + e.message;
+  }
+});
+
+async function updateMaskLog() {
+  try {
+    const r = await fetch('/api/masking/log');
+    const d = await r.json();
+    document.getElementById('mask-count').textContent = d.total;
+    const log = document.getElementById('mask-log');
+    if (d.total === 0) {
+      log.innerHTML = '<span style="color:var(--muted);font-size:11px">No masked items</span>';
+      return;
+    }
+    log.innerHTML = d.entries.map(e => `
+      <div class="mask-entry">
+        <span class="mask-token">${escapeHtml(e.token)}</span>
+        <span class="mask-pattern"> [${e.pattern_name}]</span>
+        <span style="color:var(--muted)"> ${e.preview}</span>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Init
+fetchStatus();
+setInterval(fetchStatus, 10000);
+</script>
+</body>
+</html>

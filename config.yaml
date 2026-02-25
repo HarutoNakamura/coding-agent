@@ -1,0 +1,36 @@
+local_llm:
+  provider: ollama
+  base_url: http://localhost:11434
+  model: llama3.2  # 自動検出でフォールバック
+  timeout: 60
+
+cloud_llm:
+  provider: openai  # or: anthropic
+  model: gpt-4o
+  # api_key は環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY から読む
+
+project:
+  scan_path: ./
+  exclude:
+    - .git
+    - node_modules
+    - __pycache__
+    - "*.lock"
+    - ".venv"
+    - venv
+    - dist
+    - build
+    - "*.pyc"
+    - "*.so"
+    - "*.egg-info"
+  max_file_size_kb: 100
+  max_total_files: 200
+
+masking:
+  enable_regex: true
+  enable_local_llm: true   # Ollamaが使えれば有効化
+  mask_code: false          # trueにするとコードをセマンティック説明に変換（遅い）
+
+server:
+  host: 127.0.0.1
+  port: 8765
