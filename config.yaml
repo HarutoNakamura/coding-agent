@@ -5,8 +5,8 @@ local_llm:
   timeout: 60
 
 cloud_llm:
-  provider: openai  # or: anthropic
-  model: gpt-4o
+  provider: anthropic  # or: openai
+  model: claude-sonnet-4-6
   # api_key は環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY から読む
 
 project:

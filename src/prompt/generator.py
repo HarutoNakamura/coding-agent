@@ -96,6 +96,7 @@ class PromptGenerator:
         index: ProjectIndex,
         user_query: str,
         summarized_contents: dict[str, str] | None = None,
+        llm_masked_contents: dict[str, str] | None = None,
     ) -> GeneratedPrompt:
         """
         プロジェクトインデックスとユーザークエリからプロンプトを生成する。
@@ -104,8 +105,10 @@ class PromptGenerator:
             index: ProjectIndex (スキャン済み)
             user_query: ユーザーの質問
             summarized_contents: {rel_path: summarized_text} ローカルLLMによる要約
+            llm_masked_contents: {rel_path: masked_text} OllamaによるLLMマスキング済みコンテンツ
         """
         summarized = summarized_contents or {}
+        llm_masked = llm_masked_contents or {}
 
         # ファイル内容をマスキング
         budget = self.max_context_tokens
@@ -121,9 +124,13 @@ class PromptGenerator:
         )
 
         for f in sorted_files:
-            # 要約があればそれを使う、なければ元のコンテキストをマスキング
+            # 要約があればそれを使う、なければ元のコンテキストを使う
             content = summarized.get(f.path, f.content)
-            masked_content, _ = self.mapper.mask(content)
+            if f.path in llm_masked:
+                # OllamaによるLLMマスキング済みコンテンツを使用（正規表現マスキングをスキップ）
+                masked_content = llm_masked[f.path]
+            else:
+                masked_content, _ = self.mapper.mask(content)
 
             section = self._build_file_section(f, masked_content)
             section_tokens = self._estimate_tokens(section)

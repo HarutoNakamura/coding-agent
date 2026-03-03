@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,6 +31,50 @@ def load_config(path: str = "config.yaml") -> dict:
         return {}
     with open(config_path) as f:
         return yaml.safe_load(f) or {}
+
+
+async def ensure_ollama(base_url: str = "http://localhost:11434") -> bool:
+    """
+    Ollamaが起動していなければ `ollama serve` をバックグラウンドで起動する。
+    Returns: 最終的にOllamaが利用可能かどうか
+    """
+    import httpx
+
+    async def is_up() -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(f"{base_url}/api/tags")
+                return r.status_code == 200
+        except Exception:
+            return False
+
+    if await is_up():
+        logger.info("Ollama is already running.")
+        return True
+
+    logger.info("Ollama not detected. Attempting to start `ollama serve`...")
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        logger.warning("ollama command not found. Install Ollama: https://ollama.com")
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to start Ollama: {e}")
+        return False
+
+    # 起動完了を最大10秒待つ
+    for i in range(10):
+        await asyncio.sleep(1)
+        if await is_up():
+            logger.info(f"Ollama started successfully. (waited {i + 1}s)")
+            return True
+
+    logger.warning("Ollama did not respond within 10 seconds.")
+    return False
 
 
 async def run_server(config: dict) -> None:
@@ -52,8 +97,12 @@ async def run_server(config: dict) -> None:
     state.config = config
 
     local_cfg = config.get("local_llm", {})
+    base_url = local_cfg.get("base_url", "http://localhost:11434")
+
+    await ensure_ollama(base_url)
+
     state.ollama = OllamaClient(
-        base_url=local_cfg.get("base_url", "http://localhost:11434"),
+        base_url=base_url,
         model=local_cfg.get("model", "llama3.2"),
         timeout=local_cfg.get("timeout", 60),
     )
@@ -63,10 +112,10 @@ async def run_server(config: dict) -> None:
     if auto_model:
         state.ollama.model = auto_model
         logger.info(f"Ollama model auto-selected: {auto_model}")
+    elif await state.ollama.is_available():
+        logger.warning("Ollama is running but no models are installed. Run: ollama pull llama3.2")
     else:
-        ollama_avail = await state.ollama.is_available()
-        if not ollama_avail:
-            logger.warning("Ollama not available. Code summarization disabled.")
+        logger.warning("Ollama not available. LLM masking disabled.")
 
     cloud_cfg = config.get("cloud_llm", {})
     state.cloud = CloudLLMClient(

@@ -119,7 +119,8 @@ class CloudLLMClient:
                 headers=headers,
                 json=payload,
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise ValueError(f"Anthropic API error {resp.status_code}: {resp.text}")
             data = resp.json()
             return data["content"][0]["text"]
 

@@ -40,13 +40,22 @@ class ProjectIndex:
 
     @property
     def file_tree(self) -> str:
-        """ファイルツリーの文字列表現"""
-        lines = [f"Project: {os.path.basename(self.root)}/"]
+        """ファイルツリーの文字列表現（フォルダ付き）"""
+        lines = [f"{os.path.basename(self.root)}/"]
         paths = sorted(f.path for f in self.files)
+
+        seen_dirs: set[str] = set()
         for p in paths:
-            depth = p.count(os.sep)
+            parts = p.replace("\\", "/").split("/")
+            for i in range(len(parts) - 1):
+                dir_key = "/".join(parts[: i + 1])
+                if dir_key not in seen_dirs:
+                    seen_dirs.add(dir_key)
+                    indent = "  " * i
+                    lines.append(f"{indent}  {parts[i]}/")
+            depth = len(parts) - 1
             indent = "  " * depth
-            lines.append(f"{indent}├─ {os.path.basename(p)}")
+            lines.append(f"{indent}  {parts[-1]}")
         return "\n".join(lines)
 
     @property

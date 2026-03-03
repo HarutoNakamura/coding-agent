@@ -160,7 +160,7 @@
   /* Query panel */
   .query-area {
     padding: 16px;
-    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
     display: flex;
     gap: 8px;
     align-items: flex-end;
@@ -276,6 +276,63 @@
     margin-top: 40px;
     font-size: 13px;
   }
+
+  /* Masked token highlight */
+  .masked-token {
+    background: #78350f55;
+    color: var(--warn);
+    border: 1px solid #92400e;
+    border-radius: 3px;
+    padding: 0 3px;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+  }
+
+  .masked-file-section {
+    margin-bottom: 12px;
+  }
+  .masked-file-name {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+    color: var(--accent);
+  }
+  .masked-file-section pre {
+    border-radius: 0 0 6px 6px;
+    margin: 0;
+  }
+  .ellipsis-line {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* Masked token tooltip */
+  .masked-token {
+    position: relative;
+    cursor: help;
+  }
+  .masked-token .tip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e293b;
+    border: 1px solid var(--warn);
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text);
+    white-space: nowrap;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .masked-token:hover .tip { display: block; }
 </style>
 </head>
 <body>
@@ -320,15 +377,14 @@
 
     <!-- Chat tab -->
     <div class="tab-panel active" id="tab-query">
+      <div id="response-area">
+        <div class="empty-state">プロジェクトをスキャンして質問を入力してください</div>
+      </div>
       <div class="query-area">
         <textarea id="query-input" placeholder="質問を入力... (Shift+Enter で送信)"></textarea>
         <div class="query-buttons">
           <button id="btn-send">Send</button>
-          <button id="btn-preview-only" class="secondary">Preview</button>
         </div>
-      </div>
-      <div id="response-area">
-        <div class="empty-state">プロジェクトをスキャンして質問を入力してください</div>
       </div>
     </div>
 
@@ -351,6 +407,9 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'preview') {
+      fetchPreview();
+    }
   });
 });
 
@@ -414,7 +473,6 @@ document.getElementById('btn-scan').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-send').addEventListener('click', () => sendQuery(true));
-document.getElementById('btn-preview-only').addEventListener('click', () => sendQuery(false));
 
 async function sendQuery(sendToCloud) {
   const query = document.getElementById('query-input').value.trim();
@@ -474,14 +532,75 @@ async function sendQuery(sendToCloud) {
   }
 }
 
-document.getElementById('btn-preview-only').addEventListener('click', async () => {
-  const query = document.getElementById('query-input').value.trim() || 'プロジェクトの概要を教えてください';
-  // Switch to preview tab
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelector('[data-tab="preview"]').classList.add('active');
-  document.getElementById('tab-preview').classList.add('active');
+function highlightMasked(text, maskingLog) {
+  // トークン → オリジナル値のマップを作る
+  const tipMap = {};
+  (maskingLog || []).forEach(e => {
+    tipMap[e.token] = e.original || '';
+  });
 
+  return escapeHtml(text).replace(
+    /\[([A-Z][A-Z0-9_]*_\d+)\]/g,
+    (match) => {
+      const tip = tipMap[match] ? escapeHtml(tipMap[match]) : '';
+      return `<mark class="masked-token">${escapeHtml(match)}<span class="tip">${tip || match}</span></mark>`;
+    }
+  );
+}
+
+function extractMaskedSections(promptText, maskingLog, contextLines = 3) {
+  const tokenPattern = /\[[A-Z][A-Z0-9_]*_\d+\]/;
+  const result = [];
+
+  // "### filepath" でファイルセクションに分割
+  const headerMatches = [...promptText.matchAll(/^### (.+)$/mg)];
+  if (headerMatches.length === 0) {
+    // セクション分けがない場合はテキスト全体を対象にする
+    if (tokenPattern.test(promptText)) {
+      result.push({ file: null, snippet: promptText });
+    }
+    return result;
+  }
+
+  headerMatches.forEach((match, i) => {
+    const file = match[1].trim();
+    const start = match.index + match[0].length;
+    const end = i + 1 < headerMatches.length ? headerMatches[i + 1].index : promptText.length;
+    const content = promptText.slice(start, end);
+    const lines = content.split('\n');
+
+    const matchingIndices = lines
+      .map((line, idx) => ({ line, idx }))
+      .filter(({ line }) => tokenPattern.test(line))
+      .map(({ idx }) => idx);
+
+    if (matchingIndices.length === 0) return;
+
+    // マスク行の前後 contextLines 行を含める
+    const rangeSet = new Set();
+    for (const idx of matchingIndices) {
+      for (let i = Math.max(0, idx - contextLines); i <= Math.min(lines.length - 1, idx + contextLines); i++) {
+        rangeSet.add(i);
+      }
+    }
+
+    const sortedIndices = [...rangeSet].sort((a, b) => a - b);
+    const snippetLines = [];
+    let prevIdx = -1;
+    for (const idx of sortedIndices) {
+      if (prevIdx !== -1 && idx > prevIdx + 1) snippetLines.push('\x00'); // ellipsis marker
+      snippetLines.push(lines[idx]);
+      prevIdx = idx;
+    }
+
+    result.push({ file, snippet: snippetLines.join('\n') });
+  });
+
+  return result;
+}
+
+async function fetchPreview() {
+  const query = document.getElementById('query-input').value.trim() || 'プロジェクトの概要を教えてください';
   const area = document.getElementById('preview-area');
   area.innerHTML = '<span class="spinner"></span> Generating preview...';
 
@@ -489,21 +608,40 @@ document.getElementById('btn-preview-only').addEventListener('click', async () =
     const r = await fetch('/api/preview?' + new URLSearchParams({ query }));
     if (!r.ok) { const e = await r.json(); area.textContent = 'Error: ' + e.detail; return; }
     const d = await r.json();
+
+    const sections = extractMaskedSections(d.masked_prompt, d.masking_log);
+
+    let sectionsHtml = '';
+    if (sections.length === 0) {
+      sectionsHtml = '<div class="empty-state" style="margin-top:16px">マスクされた項目はありません</div>';
+    } else {
+      sectionsHtml = sections.map(({ file, snippet }) => {
+        const highlighted = highlightMasked(snippet, d.masking_log)
+          .replace(/\x00/g, '<span class="ellipsis-line">  ···</span>');
+        return `
+          <div class="masked-file-section">
+            ${file ? `<div class="masked-file-name">${escapeHtml(file)}</div>` : ''}
+            <pre>${highlighted}</pre>
+          </div>`;
+      }).join('');
+    }
+
     area.innerHTML = `
       <div class="preview-stats">
         <div class="stat-chip">Tokens: <span>${d.estimated_tokens}</span></div>
         <div class="stat-chip">Files: <span>${d.files_included}</span></div>
-        <div class="stat-chip">Truncated: <span>${d.files_truncated}</span></div>
         <div class="stat-chip">Masked: <span>${d.masking_log.length}</span></div>
       </div>
-      <div class="panel-title">Masked Prompt Preview</div>
-      <pre>${escapeHtml(d.masked_prompt)}</pre>
+      <div class="panel-title" style="margin-top:8px">
+        マスク箇所 <span style="color:var(--muted);font-size:10px;font-weight:400;text-transform:none">（オレンジにホバーで元の値）</span>
+      </div>
+      ${sectionsHtml}
     `;
     updateMaskLog();
   } catch(e) {
     area.textContent = 'Error: ' + e.message;
   }
-});
+}
 
 async function updateMaskLog() {
   try {

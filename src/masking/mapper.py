@@ -76,6 +76,25 @@ class MaskMapper:
 
         return result, list(self._map.values())
 
+    def mask_detections(self, text: str, detections: list[dict]) -> str:
+        """
+        LLMが検出した機密情報リストを元にテキストをマスキングする。
+        detections: [{"value": "機密値", "type": "種別"}, ...]
+        """
+        result = text
+        for det in detections:
+            value = str(det.get("value", "")).strip()
+            dtype = (
+                str(det.get("type", "secret"))
+                .upper()
+                .replace(" ", "_")
+                .replace("-", "_")
+            )
+            if value and len(value) >= 3 and value in result:
+                token = self._register(value, dtype, f"llm_{det.get('type', 'secret')}")
+                result = result.replace(value, token)
+        return result
+
     def unmask(self, text: str) -> str:
         """マスクされたトークンを元の値に戻す。"""
         result = text
