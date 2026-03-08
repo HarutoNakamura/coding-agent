@@ -97,6 +97,7 @@ class PromptGenerator:
         user_query: str,
         summarized_contents: dict[str, str] | None = None,
         llm_masked_contents: dict[str, str] | None = None,
+        files: list[ScannedFile] | None = None,
     ) -> GeneratedPrompt:
         """
         プロジェクトインデックスとユーザークエリからプロンプトを生成する。
@@ -116,12 +117,16 @@ class PromptGenerator:
         files_included = 0
         files_truncated = 0
 
-        # 優先度: 拡張子でソート（コードファイル優先）
-        code_exts = {".py", ".js", ".ts", ".go", ".java", ".rs", ".swift", ".kt"}
-        sorted_files = sorted(
-            index.files,
-            key=lambda f: (0 if f.extension in code_exts else 1, f.path)
-        )
+        # files が指定されていれば選択済みリストを使う（FileSelectorから渡される）
+        # None の場合は従来通り全ファイルを拡張子優先でソート
+        if files is not None:
+            sorted_files = files
+        else:
+            code_exts = {".py", ".js", ".ts", ".go", ".java", ".rs", ".swift", ".kt"}
+            sorted_files = sorted(
+                index.files,
+                key=lambda f: (0 if f.extension in code_exts else 1, f.path)
+            )
 
         for f in sorted_files:
             # 要約があればそれを使う、なければ元のコンテキストを使う

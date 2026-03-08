@@ -4,6 +4,13 @@ local_llm:
   model: llama3.2  # 自動検出でフォールバック
   timeout: 60
 
+pii_llm:
+  base_url: http://127.0.0.1:8766
+  timeout: 30
+  enable: true
+  # 自動起動するモデルパス（空にすると自動起動しない）
+  model_path: /Users/admin/Desktop/compe/LFM2-350M-PII-Extract-JP-GGUF/LFM2-350M-PII-Extract-JP-Q4_K_M.gguf
+
 cloud_llm:
   provider: anthropic  # or: openai
   model: claude-sonnet-4-6
@@ -30,6 +37,10 @@ masking:
   enable_regex: true
   enable_local_llm: true   # Ollamaが使えれば有効化
   mask_code: false          # trueにするとコードをセマンティック説明に変換（遅い）
+
+selector:
+  max_files: 10    # クエリ毎に選択する最大ファイル数
+  min_score: 0.1   # このスコア未満はフォールバック対象
 
 server:
   host: 127.0.0.1

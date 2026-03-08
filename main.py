@@ -77,6 +77,64 @@ async def ensure_ollama(base_url: str = "http://localhost:11434") -> bool:
     return False
 
 
+async def ensure_llama_server(base_url: str, model_path: str) -> bool:
+    """
+    llama-serverが起動していなければバックグラウンドで起動する。
+    Returns: 最終的にllama-serverが利用可能かどうか
+    """
+    import httpx
+
+    async def is_up() -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(f"{base_url}/health")
+                return r.status_code == 200
+        except Exception:
+            return False
+
+    if await is_up():
+        logger.info("llama-server (PII) is already running.")
+        return True
+
+    if not model_path or not Path(model_path).exists():
+        logger.warning(f"LFM2 model not found: {model_path}. PII extraction disabled.")
+        return False
+
+    logger.info(f"Starting llama-server with {Path(model_path).name} ...")
+    try:
+        port = base_url.rsplit(":", 1)[-1]
+        subprocess.Popen(
+            [
+                "llama-server",
+                "--model", model_path,
+                "--host", "127.0.0.1",
+                "--port", port,
+                "--temp", "0.0",
+                "--jinja",
+                "--ctx-size", "4096",
+                "-ngl", "99",
+                "--log-disable",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        logger.warning("llama-server not found. Install with: brew install llama.cpp")
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to start llama-server: {e}")
+        return False
+
+    for i in range(15):
+        await asyncio.sleep(1)
+        if await is_up():
+            logger.info(f"llama-server started. (waited {i + 1}s)")
+            return True
+
+    logger.warning("llama-server did not respond within 15 seconds.")
+    return False
+
+
 async def run_server(config: dict) -> None:
     import uvicorn
     from fastapi import FastAPI
@@ -86,6 +144,7 @@ async def run_server(config: dict) -> None:
     from src.api.routes import router, state
     from src.llm.local import OllamaClient
     from src.llm.cloud import CloudLLMClient
+    from src.llm.pii_extractor import PIIExtractorClient
 
     app = FastAPI(
         title="Coding Agent",
@@ -100,6 +159,12 @@ async def run_server(config: dict) -> None:
     base_url = local_cfg.get("base_url", "http://localhost:11434")
 
     await ensure_ollama(base_url)
+
+    pii_cfg = config.get("pii_llm", {})
+    if pii_cfg.get("enable", True):
+        pii_base_url = pii_cfg.get("base_url", "http://127.0.0.1:8766")
+        pii_model = pii_cfg.get("model_path", "")
+        await ensure_llama_server(pii_base_url, pii_model)
 
     state.ollama = OllamaClient(
         base_url=base_url,
@@ -116,6 +181,20 @@ async def run_server(config: dict) -> None:
         logger.warning("Ollama is running but no models are installed. Run: ollama pull llama3.2")
     else:
         logger.warning("Ollama not available. LLM masking disabled.")
+
+    pii_cfg = config.get("pii_llm", {})
+    if pii_cfg.get("enable", True):
+        state.pii = PIIExtractorClient(
+            base_url=pii_cfg.get("base_url", "http://127.0.0.1:8766"),
+            timeout=pii_cfg.get("timeout", 30),
+        )
+        if await state.pii.is_available():
+            logger.info("LFM2 PII extractor: available at port 8766")
+        else:
+            logger.info(
+                "LFM2 PII extractor: not running "
+                "(start with: scripts/start_pii_server.sh)"
+            )
 
     cloud_cfg = config.get("cloud_llm", {})
     state.cloud = CloudLLMClient(

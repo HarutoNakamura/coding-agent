@@ -21,6 +21,7 @@ class PreviewResponse(BaseModel):
     files_included: int
     files_truncated: int
     masking_log: list[dict]
+    selected_files: list[str] = []
 
 
 class QueryResponse(BaseModel):
@@ -31,6 +32,7 @@ class QueryResponse(BaseModel):
     masking_count: int
     cost_estimate: Optional[dict] = None
     local_llm_used: bool = False
+    selected_files: list[str] = []
 
 
 class ProjectInfo(BaseModel):
@@ -51,6 +53,7 @@ class StatusResponse(BaseModel):
     status: str
     project_loaded: bool
     local_llm_available: bool
+    pii_llm_available: bool
     cloud_llm_configured: bool
     provider: str
     model: str
