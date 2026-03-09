@@ -2,7 +2,7 @@
 
 ローカルLLMをプロキシとして使う**プロンプト特化型コーディングエージェント**。
 
-プロジェクトのコードを読んで、APIキーや秘密情報を自動マスキングしてからクラウドLLMに質問できる。
+プロジェクトのコードを読んで、APIキーや個人情報を自動マスキングしてからクラウドLLMに質問できる。
 
 ---
 
@@ -13,9 +13,11 @@
     ↓
 プロジェクトをスキャン（全ファイル読み込み）
     ↓
-Ollama（任意）でコードを意味説明に変換
+クエリと関連するファイルだけを自動選択
     ↓
-APIキー・シークレットを [SECRET_001] に置換
+regex でAPIキー・シークレットを [OPENAI_KEY_001] に置換
+    ↓
+LFM2-350M で日本語PII（人名・住所・電話番号・法人名）を検出・置換
     ↓
 詳細なコンテキスト付きプロンプトを生成
     ↓
@@ -38,7 +40,16 @@ cd coding-agent
 pip3 install -r requirements.txt
 ```
 
-### 2. APIキーを環境変数に設定
+### 2. LFM2モデルをダウンロード（日本語PII抽出用）
+
+```bash
+brew install git-lfs llama.cpp
+git lfs clone https://huggingface.co/LiquidAI/LFM2-350M-PII-Extract-JP-GGUF
+```
+
+`config.yaml` の `pii_llm.model_path` にダウンロード先のパスを設定する。
+
+### 3. APIキーを環境変数に設定
 
 **Claude (Anthropic) を使う場合:**
 ```bash
@@ -58,12 +69,12 @@ source ~/.zshrc
 
 > **注意:** APIキーをチャットやコードに直接貼り付けないでください。
 
-### 3. `config.yaml` でプロバイダーを選択
+### 4. `config.yaml` でプロバイダーを選択
 
 ```yaml
 cloud_llm:
   provider: anthropic  # openai または anthropic
-  model: claude-sonnet-4-6  # 使いたいモデル
+  model: claude-sonnet-4-6
 ```
 
 ---
@@ -76,7 +87,7 @@ cloud_llm:
 python3 main.py
 ```
 
-ブラウザで `http://localhost:8765` を開く。
+起動時に Ollama・llama-server が自動起動する。ブラウザで `http://localhost:8765` を開く。
 
 1. 左サイドバーの **Project** にスキャンしたいディレクトリのパスを入力
 2. **Scan** ボタンを押す → ファイルツリーが表示される
@@ -104,9 +115,9 @@ Scanning: /path/to/your/project
   Size: 120KB
 
 [Masked 3 items]
-  [SECRET_001] <- [generic_secret] mysecr****
-  [EMAIL_001]  <- [email]          john.****
-  [AWS_KEY_001]<- [aws_access_key] AKIA****
+  [SECRET_001]   <- [generic_secret] mysecr****
+  [EMAIL_001]    <- [email]          john.****
+  [AWS_KEY_001]  <- [aws_access_key] AKIA****
 
 [Prompt Preview (first 1000 chars)]
 ...
@@ -150,7 +161,11 @@ Swagger UI: `http://localhost:8765/docs`
 
 ## マスキングの仕組み
 
-クラウドに送る前に以下のパターンを自動検出して `[TOKEN_001]` 形式に置換する。
+クラウドに送る前に**3層のマスキング**を適用する。
+
+### Layer 1: regex（常時有効）
+
+パターンが既知の情報を高速検出・置換。
 
 | 対象 | 検出例 | 置換後 |
 |------|--------|--------|
@@ -164,19 +179,42 @@ Swagger UI: `http://localhost:8765/docs`
 | プライベートIP | `192.168.x.x` | `[PRIVATE_IP_001]` |
 | .env の値 | `API_KEY=xxxxxx` | `[ENV_VAR_001]` |
 
+### Layer 2: LFM2-350M-PII-Extract-JP（日本語PII）
+
+[LiquidAI/LFM2-350M-PII-Extract-JP](https://huggingface.co/LiquidAI/LFM2-350M-PII-Extract-JP) を llama-server でローカル実行。
+regexでは検出できない**日本語の意味的なPII**を抽出する。
+
+| 対象 | 例 | 置換後 |
+|------|-----|--------|
+| 人名 | 田中太郎 | `[HUMAN_NAME_001]` |
+| 住所 | 東京都渋谷区1-2-3 | `[ADDRESS_001]` |
+| 電話番号 | 090-1234-5678 | `[PHONE_001]` |
+| 法人名・機関名 | 株式会社ABC | `[COMPANY_001]` |
+
+モデルは `main.py` 起動時に llama-server(:8766) として自動起動する。
+手動で起動する場合: `bash scripts/start_pii_server.sh [Q4_K_M|Q8_0|...]`
+
+### Layer 3: Ollama（オプション）
+
+`config.yaml` で `enable_local_llm: true` かつ Ollama が起動している場合、追加の機密情報検出を行う。
+`mask_code: true` にするとコードを意味説明に変換してから送信（生コードを送りたくない場合）。
+
 マッピングテーブルは内部で保持されるため、レスポンスを元に戻すことも可能（`unmask_response: true`）。
 
-### Ollama によるコードサマライズ（オプション）
+---
 
-`config.yaml` で `mask_code: true` にすると、Ollama がコードを意味説明に変換してからクラウドに送る（生のコードを送りたくない場合に使う）。
+## クエリベースのファイル選択
 
-```yaml
-masking:
-  mask_code: true  # Ollama が必要
-```
+質問内容に関連するファイルだけをマスク・送信する。無関係なファイルはコンテキストに含まれない。
 
-Ollama のインストール: https://ollama.com
-モデルは自動検出（llama3.2 / mistral / codellama など）。
+| クエリ | 選択されるファイル |
+|--------|------------------|
+| `マスキングの実装を教えて` | `src/masking/mapper.py`, `patterns.py` |
+| `Ollamaのクライアントを見せて` | `src/llm/local.py` |
+| `pii extractor の仕組み` | `src/llm/pii_extractor.py` |
+| `APIルーターの設定` | `src/api/routes.py` |
+
+英語・日本語（カタカナ含む）の両方に対応。`config.yaml` の `selector.max_files` で選択数を調整できる。
 
 ---
 
@@ -189,25 +227,34 @@ local_llm:
   model: llama3.2        # 起動時に自動検出・選択
   timeout: 60
 
+pii_llm:
+  base_url: http://127.0.0.1:8766  # llama-server
+  timeout: 30
+  enable: true
+  model_path: /path/to/LFM2-350M-PII-Extract-JP-Q4_K_M.gguf  # 自動起動するモデル
+
 cloud_llm:
   provider: anthropic    # openai または anthropic
   model: claude-sonnet-4-6
   # api_key: ここに書かず環境変数を使うこと
 
 project:
-  scan_path: ./
   exclude:               # スキャンから除外するパターン
     - .git
     - node_modules
     - __pycache__
     - "*.lock"
-  max_file_size_kb: 100  # 1ファイルの上限
-  max_total_files: 200   # 最大ファイル数
+  max_file_size_kb: 100
+  max_total_files: 200
 
 masking:
-  enable_regex: true     # regex マスキング（常時推奨）
-  enable_local_llm: true # Ollama によるマスキング
-  mask_code: false       # コードを説明文に変換（遅い）
+  enable_regex: true
+  enable_local_llm: true
+  mask_code: false       # trueにするとコードを説明文に変換（Ollama必要）
+
+selector:
+  max_files: 10          # クエリ毎に選択する最大ファイル数
+  min_score: 0.1         # このスコア未満はフォールバック対象
 
 server:
   host: 127.0.0.1
@@ -220,17 +267,22 @@ server:
 
 ```
 coding-agent/
-├── main.py               # エントリポイント
+├── main.py               # エントリポイント（Ollama・llama-server自動起動）
 ├── config.yaml           # 設定ファイル
 ├── requirements.txt
+├── scripts/
+│   └── start_pii_server.sh  # llama-server 手動起動スクリプト
 ├── src/
 │   ├── scanner/
-│   │   └── project.py    # プロジェクトスキャナ
+│   │   └── project.py    # プロジェクトスキャナ（.gitignore対応）
+│   ├── selector/
+│   │   └── relevance.py  # クエリベースファイル選択（JP/EN対応）
 │   ├── masking/
-│   │   ├── patterns.py   # マスキングパターン定義
+│   │   ├── patterns.py   # regexマスキングパターン定義
 │   │   └── mapper.py     # マッピングテーブル管理
 │   ├── llm/
 │   │   ├── local.py      # Ollama クライアント
+│   │   ├── pii_extractor.py  # LFM2 PIIクライアント（llama-server）
 │   │   └── cloud.py      # OpenAI / Anthropic クライアント
 │   ├── prompt/
 │   │   └── generator.py  # プロンプト生成
