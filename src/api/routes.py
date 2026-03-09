@@ -264,16 +264,9 @@ async def query(req: QueryRequest):
         try:
             response_text = await state.cloud.chat(prompt_result.messages)
 
-            # コスト概算
-            import tiktoken
-            try:
-                enc = tiktoken.encoding_for_model("gpt-4o")
-                prompt_tokens = len(enc.encode(str(prompt_result.messages)))
-                completion_tokens = len(enc.encode(response_text))
-            except Exception:
-                prompt_tokens = prompt_result.estimated_tokens
-                completion_tokens = len(response_text) // 4
-
+            # コスト概算（文字数ベースの推定: 1トークン≒4文字）
+            prompt_tokens = prompt_result.estimated_tokens
+            completion_tokens = len(response_text) // 4
             cost = state.cloud.estimate_cost(prompt_tokens, completion_tokens)
 
         except Exception as e:
