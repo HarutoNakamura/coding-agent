@@ -7,12 +7,45 @@ Usage:
 """
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
+# venv の自動セットアップ: 必要なパッケージがなければ venv を作って再起動する
+def _ensure_venv() -> None:
+    venv_dir = (Path(__file__).parent / ".venv").resolve()
+    venv_python = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    sentinel = venv_dir / ".installed"
+
+    # すでにこの venv 内で動いていれば何もしない（sys.prefix で判定）
+    if Path(sys.prefix).resolve() == venv_dir:
+        return
+
+    # venv がなければ作成
+    if not venv_python.exists():
+        print("[setup] Creating virtual environment...")
+        subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
+
+    # sentinel がなければ依存パッケージをインストール（初回のみ）
+    if not sentinel.exists():
+        req = Path(__file__).parent / "requirements.txt"
+        if req.exists():
+            print("[setup] Installing dependencies (first run)...")
+            result = subprocess.run(
+                [str(venv_python), "-m", "pip", "install", "-q", "-r", str(req)]
+            )
+            if result.returncode == 0:
+                sentinel.touch()
+
+    # venv の python で自分自身を再起動
+    raise SystemExit(subprocess.run([str(venv_python)] + sys.argv).returncode)
+
+_ensure_venv()
+
 import argparse
 import asyncio
 import logging
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import yaml

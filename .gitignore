@@ -28,3 +28,4 @@ venv/
 
 # Project cache
 .coding_agent_cache/
+.venv/
