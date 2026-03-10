@@ -475,8 +475,10 @@ document.getElementById('btn-scan').addEventListener('click', async () => {
 document.getElementById('btn-send').addEventListener('click', () => sendQuery(true));
 
 async function sendQuery(sendToCloud) {
-  const query = document.getElementById('query-input').value.trim();
+  const queryInput = document.getElementById('query-input');
+  const query = queryInput.value.trim();
   if (!query) return;
+  queryInput.value = '';
 
   const area = document.getElementById('response-area');
   const emptyState = area.querySelector('.empty-state');
@@ -522,7 +524,6 @@ async function sendQuery(sendToCloud) {
       <div style="white-space: pre-wrap;">${escapeHtml(d.response)}</div>
       <div class="meta">${meta}</div>
     `;
-    document.getElementById('query-input').value = '';
     updateMaskLog();
   } catch(e) {
     loadMsg.innerHTML = `<div class="role">Error</div>${escapeHtml(e.message)}`;
