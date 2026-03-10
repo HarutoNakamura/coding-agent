@@ -222,6 +222,28 @@
   }
 
   /* Preview panel */
+  #history-bar {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  #history-bar select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 5px 8px;
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+    flex: 1;
+  }
+  #history-bar select:focus { border-color: var(--accent); }
   #preview-area {
     flex: 1;
     overflow-y: auto;
@@ -390,8 +412,12 @@
 
     <!-- Preview tab -->
     <div class="tab-panel" id="tab-preview">
+      <div id="history-bar">
+        <span>送信履歴:</span>
+        <select id="history-select"></select>
+      </div>
       <div id="preview-area">
-        <div class="empty-state">「Preview」ボタンを押すとマスク済みプロンプトを表示します</div>
+        <div class="empty-state">Sendを押すとここにマスク済みプロンプトが表示されます</div>
       </div>
     </div>
   </div>
@@ -525,6 +551,12 @@ async function sendQuery(sendToCloud) {
       <div class="meta">${meta}</div>
     `;
     updateMaskLog();
+    // Previewタブが開いていれば最新プロンプトに更新
+    if (document.querySelector('.tab[data-tab="preview"]').classList.contains('active')) {
+      fetchPreview(0);
+    } else {
+      refreshHistorySelect();
+    }
   } catch(e) {
     loadMsg.innerHTML = `<div class="role">Error</div>${escapeHtml(e.message)}`;
   } finally {
@@ -600,18 +632,23 @@ function extractMaskedSections(promptText, maskingLog, contextLines = 3) {
   return result;
 }
 
-async function fetchPreview() {
-  const query = document.getElementById('query-input').value.trim() || 'プロジェクトの概要を教えてください';
+async function fetchPreview(index = 0) {
   const area = document.getElementById('preview-area');
-  area.innerHTML = '<span class="spinner"></span> Generating preview...';
+  area.innerHTML = '<span class="spinner"></span> Loading...';
+
+  // 履歴セレクトを更新
+  const hasHistory = await refreshHistorySelect();
+  if (!hasHistory) {
+    area.innerHTML = '<div class="empty-state">Sendを押すとここにマスク済みプロンプトが表示されます</div>';
+    return;
+  }
 
   try {
-    const r = await fetch('/api/preview?' + new URLSearchParams({ query }));
+    const r = await fetch('/api/preview?' + new URLSearchParams({ index }));
     if (!r.ok) { const e = await r.json(); area.textContent = 'Error: ' + e.detail; return; }
     const d = await r.json();
 
     const sections = extractMaskedSections(d.masked_prompt, d.masking_log);
-
     let sectionsHtml = '';
     if (sections.length === 0) {
       sectionsHtml = '<div class="empty-state" style="margin-top:16px">マスクされた項目はありません</div>';
@@ -638,11 +675,36 @@ async function fetchPreview() {
       </div>
       ${sectionsHtml}
     `;
-    updateMaskLog();
   } catch(e) {
     area.textContent = 'Error: ' + e.message;
   }
 }
+
+async function refreshHistorySelect() {
+  try {
+    const r = await fetch('/api/prompt-history');
+    const d = await r.json();
+    const bar = document.getElementById('history-bar');
+    const sel = document.getElementById('history-select');
+    if (d.entries.length === 0) {
+      bar.style.display = 'none';
+      return false;
+    }
+    const currentIndex = parseInt(sel.value) || 0;
+    bar.style.display = 'flex';
+    sel.innerHTML = d.entries.map(e =>
+      `<option value="${e.index}">${e.index === 0 ? '最新: ' : `${e.index + 1}つ前: `}${escapeHtml(e.query.slice(0, 50))}${e.query.length > 50 ? '…' : ''}</option>`
+    ).join('');
+    sel.value = Math.min(currentIndex, d.entries.length - 1);
+    return true;
+  } catch(e) {
+    return false;
+  }
+}
+
+document.getElementById('history-select').addEventListener('change', e => {
+  fetchPreview(parseInt(e.target.value));
+});
 
 async function updateMaskLog() {
   try {

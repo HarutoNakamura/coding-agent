@@ -30,6 +30,8 @@ router = APIRouter()
 # ---- アプリケーション状態 (シングルトン的に使う) ----
 
 class AgentState:
+    MAX_HISTORY = 20
+
     def __init__(self) -> None:
         self.index: Optional[ProjectIndex] = None
         self.mapper = MaskMapper()
@@ -39,6 +41,7 @@ class AgentState:
         self.config: dict = {}
         self.summarized: dict[str, str] = {}  # path -> ollama summary
         self._selector: Optional[FileSelector] = None
+        self.prompt_history: list[dict] = []  # 直近のプロンプトスナップショット
 
     @property
     def selector(self) -> FileSelector:
@@ -50,9 +53,15 @@ class AgentState:
             )
         return self._selector
 
+    def save_prompt_snapshot(self, snapshot: dict) -> None:
+        self.prompt_history.insert(0, snapshot)
+        if len(self.prompt_history) > self.MAX_HISTORY:
+            self.prompt_history.pop()
+
     def reset_masking(self) -> None:
         self.mapper.reset()
         self.summarized.clear()
+        self.prompt_history.clear()
 
 
 state = AgentState()
@@ -142,65 +151,33 @@ async def get_project():
 
 # ---- プロンプトプレビュー ----
 
+@router.get("/api/prompt-history")
+async def get_prompt_history():
+    """Sendで送信したプロンプトの履歴一覧（最新順）。"""
+    return {
+        "entries": [
+            {"index": i, "query": e["query"]}
+            for i, e in enumerate(state.prompt_history)
+        ]
+    }
+
+
 @router.get("/api/preview")
-async def preview_prompt(query: str = "このプロジェクトの概要を説明してください"):
-    """マスク済みのプロンプトをプレビューする（クラウドには送らない）。"""
-    if not state.index:
-        raise HTTPException(status_code=404, detail="No project loaded.")
+async def preview_prompt(index: int = 0):
+    """直近のSendで生成されたマスク済みプロンプトを返す。"""
+    if not state.prompt_history:
+        raise HTTPException(status_code=404, detail="まだSendが押されていません。")
+    if index >= len(state.prompt_history):
+        raise HTTPException(status_code=404, detail=f"index {index} は範囲外です。")
 
-    cfg = state.config
-    provider = cfg.get("cloud_llm", {}).get("provider", "openai")
-
-    # プレビュー用に一時的なmapperを使う（メインmapperは汚染しない）
-    preview_mapper = MaskMapper()
-
-    # クエリに関連するファイルだけを選択
-    selected_files = state.selector.select(state.index.files, query)
-
-    # 選択されたファイルだけをマスク
-    llm_masked: dict[str, str] = {}
-    masking_cfg = cfg.get("masking", {})
-    pii_cfg = cfg.get("pii_llm", {})
-    pii_enabled = pii_cfg.get("enable", True)
-
-    for f in selected_files:
-        content = f.content
-
-        # Ollama: APIキー・シークレット系
-        if masking_cfg.get("enable_local_llm", True) and state.ollama and await state.ollama.is_available():
-            detections = await state.ollama.detect_secrets(content)
-            if detections:
-                content = preview_mapper.mask_detections(content, detections)
-
-        # LFM2: 日本語PII（人名・住所・電話番号・法人名）
-        if pii_enabled and state.pii and await state.pii.is_available():
-            pii_detections = await state.pii.extract_pii(content)
-            if pii_detections:
-                content = preview_mapper.mask_detections(content, pii_detections)
-
-        llm_masked[f.path] = content
-
-    gen = PromptGenerator(
-        mapper=preview_mapper,
-        max_context_tokens=cfg.get("max_context_tokens", 30_000),
-        provider=provider,
-    )
-    result = gen.generate(state.index, query, state.summarized, llm_masked, files=selected_files)
-
+    entry = state.prompt_history[index]
     return PreviewResponse(
-        masked_prompt=result.context,
-        estimated_tokens=result.estimated_tokens,
-        files_included=result.files_included,
-        files_truncated=result.files_truncated,
-        masking_log=[
-            {
-                "token": e.token,
-                "pattern": e.pattern_name,
-                "original": e.original[:40] + ("..." if len(e.original) > 40 else ""),
-            }
-            for e in preview_mapper.entries
-        ],
-        selected_files=[f.path for f in selected_files],
+        masked_prompt=entry["masked_prompt"],
+        estimated_tokens=entry["estimated_tokens"],
+        files_included=entry["files_included"],
+        files_truncated=0,
+        masking_log=entry["masking_log"],
+        selected_files=entry["selected_files"],
     )
 
 
@@ -277,6 +254,23 @@ async def query(req: QueryRequest):
     else:
         # クラウドに送らない場合はプロンプトのプレビューを返す
         response_text = f"[Preview only - not sent to cloud]\n\n{prompt_result.context[:3000]}"
+
+    # プロンプトスナップショットを履歴に保存
+    state.save_prompt_snapshot({
+        "query": req.query,
+        "masked_prompt": prompt_result.context,
+        "estimated_tokens": prompt_result.estimated_tokens,
+        "files_included": prompt_result.files_included,
+        "selected_files": [f.path for f in selected_files],
+        "masking_log": [
+            {
+                "token": e.token,
+                "pattern": e.pattern_name,
+                "original": e.original[:40] + ("..." if len(e.original) > 40 else ""),
+            }
+            for e in state.mapper.entries
+        ],
+    })
 
     return QueryResponse(
         query=req.query,
