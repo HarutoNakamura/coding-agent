@@ -108,11 +108,22 @@
   #file-tree {
     font-family: 'Courier New', monospace;
     font-size: 11px;
-    color: var(--muted);
-    line-height: 1.6;
-    white-space: pre;
+    line-height: 1.7;
     overflow-x: auto;
   }
+  .tree-dir-label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text);
+    border-radius: 4px;
+    padding: 0 2px;
+    user-select: none;
+  }
+  .tree-dir-label:hover { color: var(--accent); background: var(--surface2); }
+  .tree-arrow { color: var(--muted); font-size: 9px; width: 10px; flex-shrink: 0; }
+  .tree-file { color: var(--muted); padding: 0 2px; }
 
   #mask-log { display: flex; flex-direction: column; gap: 4px; }
   .mask-entry {
@@ -486,7 +497,9 @@ document.getElementById('btn-scan').addEventListener('click', async () => {
     }
     // Update file tree
     const proj = await fetch('/api/project').then(r => r.json());
-    document.getElementById('file-tree').textContent = proj.file_tree;
+    const rootName = proj.root.split('/').pop() || proj.root;
+    document.getElementById('file-tree').innerHTML =
+      renderTreeNode(rootName, buildFileTree(proj.files), 0);
     setBadge('badge-project', 'ok', `${proj.total_files} files`);
     updateMaskLog();
     fetchStatus();
@@ -724,6 +737,53 @@ async function updateMaskLog() {
       </div>
     `).join('');
   } catch(e) {}
+}
+
+// ---- File Tree ----
+
+function buildFileTree(paths) {
+  const root = {};
+  for (const path of paths) {
+    const parts = path.replace(/\\/g, '/').split('/');
+    let node = root;
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      if (i === parts.length - 1) { node[p] = null; }
+      else { if (!node[p]) node[p] = {}; node = node[p]; }
+    }
+  }
+  return root;
+}
+
+function renderTreeChildren(node, depth) {
+  const entries = Object.entries(node).sort(([an, av], [bn, bv]) => {
+    if ((av !== null) !== (bv !== null)) return av !== null ? -1 : 1;
+    return an.localeCompare(bn);
+  });
+  return entries.map(([name, child]) => renderTreeNode(name, child, depth)).join('');
+}
+
+function renderTreeNode(name, node, depth) {
+  const indent = depth * 14;
+  if (node === null) {
+    return `<div class="tree-file" style="padding-left:${indent + 14}px">${escapeHtml(name)}</div>`;
+  }
+  const isOpen = depth === 0;
+  return `
+    <div>
+      <div class="tree-dir-label" style="padding-left:${indent}px" onclick="toggleDir(this)">
+        <span class="tree-arrow">${isOpen ? '▾' : '▸'}</span>${escapeHtml(name)}/
+      </div>
+      <div style="${isOpen ? '' : 'display:none'}">${renderTreeChildren(node, depth + 1)}</div>
+    </div>`;
+}
+
+function toggleDir(label) {
+  const children = label.nextElementSibling;
+  const arrow = label.querySelector('.tree-arrow');
+  const open = children.style.display !== 'none';
+  children.style.display = open ? 'none' : '';
+  arrow.textContent = open ? '▸' : '▾';
 }
 
 function escapeHtml(str) {

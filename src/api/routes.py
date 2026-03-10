@@ -146,6 +146,7 @@ async def get_project():
         extensions=s["extensions"],
         total_size_kb=s["total_size_kb"],
         file_tree=state.index.file_tree,
+        files=[f.path for f in state.index.files],
     )
 
 

@@ -42,6 +42,7 @@ class ProjectInfo(BaseModel):
     extensions: dict[str, int]
     total_size_kb: int
     file_tree: str
+    files: list[str] = []
 
 
 class MaskingLogResponse(BaseModel):
