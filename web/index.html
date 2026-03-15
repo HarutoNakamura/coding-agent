@@ -792,6 +792,7 @@ async function sendQuery(query) {
       <div style="white-space: pre-wrap;">${escapeHtml(d.response)}</div>
       <div class="meta">${meta}</div>
     `;
+    loadMsg.scrollIntoView({ behavior: 'smooth', block: 'start' });
     updateMaskLog();
     if (document.querySelector('.tab[data-tab="preview"]').classList.contains('active')) {
       fetchPreview(0);
@@ -802,7 +803,6 @@ async function sendQuery(query) {
     loadMsg.innerHTML = `<div class="role">Error</div>${escapeHtml(e.message)}`;
   } finally {
     btn.disabled = false;
-    area.scrollTop = area.scrollHeight;
   }
 }
 

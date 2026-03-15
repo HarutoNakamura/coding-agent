@@ -279,7 +279,18 @@ async def query(req: QueryRequest):
         # クラウドに送らない場合はプロンプトのプレビューを返す
         response_text = f"[Preview only - not sent to cloud]\n\n{prompt_result.context[:3000]}"
 
-    # プロンプトスナップショットを履歴に保存
+    # プロンプトスナップショットを履歴に保存（実際に送信した場合のみ）
+    if not req.send_to_cloud:
+        return QueryResponse(
+            query=req.query,
+            response=response_text,
+            estimated_tokens=prompt_result.estimated_tokens,
+            files_included=prompt_result.files_included,
+            masking_count=len([e for e in state.mapper.entries if e.token in prompt_result.context]),
+            local_llm_used=bool(state.summarized),
+            selected_files=[f.path for f in selected_files],
+        )
+
     state.save_prompt_snapshot({
         "query": req.query,
         "masked_prompt": prompt_result.context,
@@ -294,6 +305,7 @@ async def query(req: QueryRequest):
                 "original": e.original[:40] + ("..." if len(e.original) > 40 else ""),
             }
             for e in state.mapper.entries
+            if e.token in prompt_result.context
         ],
     })
 
@@ -302,7 +314,7 @@ async def query(req: QueryRequest):
         response=response_text,
         estimated_tokens=prompt_result.estimated_tokens,
         files_included=prompt_result.files_included,
-        masking_count=len(state.mapper.entries),
+        masking_count=len([e for e in state.mapper.entries if e.token in prompt_result.context]),
         cost_estimate=cost,
         local_llm_used=local_llm_used,
         selected_files=[f.path for f in selected_files],
