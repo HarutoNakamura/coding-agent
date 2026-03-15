@@ -35,6 +35,8 @@ LFM2-350M で日本語PII（人名・住所・電話番号・法人名）を検�
 
 ### 1. 依存パッケージをインストール
 
+初回起動時に `.venv` が自動作成され、`requirements.txt` のパッケージもインストールされる。手動で行う場合:
+
 ```bash
 cd coding-agent
 pip3 install -r requirements.txt
@@ -135,9 +137,12 @@ Scanning: /path/to/your/project
 | `POST` | `/api/scan` | プロジェクトをスキャン |
 | `GET`  | `/api/project` | スキャン済みプロジェクト情報 |
 | `POST` | `/api/query` | 質問をクラウドLLMに送信 |
-| `GET`  | `/api/preview` | マスク済みプロンプトをプレビュー |
+| `GET`  | `/api/prompt-history` | 送信済みプロンプトの履歴一覧 |
+| `GET`  | `/api/preview?index=0` | 送信済みプロンプトのマスク済み内容を表示 |
 | `GET`  | `/api/masking/log` | マスキングされた項目の一覧 |
 | `POST` | `/api/masking/reset` | マスキングテーブルをリセット |
+| `GET`  | `/api/settings` | 現在の設定を取得 |
+| `POST` | `/api/settings` | 設定を更新（`mask_code` など） |
 
 **例: curlで質問する**
 ```bash
@@ -151,8 +156,11 @@ curl -X POST http://localhost:8765/api/query \
   -H "Content-Type: application/json" \
   -d '{"query": "このプロジェクトのDB設計を説明して", "send_to_cloud": true}'
 
-# プロンプトのプレビューだけ見る（送信しない）
-curl "http://localhost:8765/api/preview?query=概要を教えて"
+# 送信済みプロンプトの履歴を見る
+curl "http://localhost:8765/api/prompt-history"
+
+# 直近の送信プロンプト（マスク済み）をプレビュー
+curl "http://localhost:8765/api/preview?index=0"
 ```
 
 Swagger UI: `http://localhost:8765/docs`
@@ -172,6 +180,7 @@ Swagger UI: `http://localhost:8765/docs`
 | OpenAI APIキー | `sk-proj-abc...` | `[OPENAI_KEY_001]` |
 | Anthropic APIキー | `sk-ant-abc...` | `[ANTHROPIC_KEY_001]` |
 | AWS アクセスキー | `AKIA...` | `[AWS_KEY_001]` |
+| AWS シークレットキー | `AWS_SECRET_ACCESS_KEY=...` | `[AWS_SECRET_001]` |
 | GitHub token | `ghp_...` | `[GITHUB_TOKEN_001]` |
 | パスワード・シークレット | `password="xxx"` | `[SECRET_001]` |
 | Bearer token | `Authorization: Bearer ...` | `[BEARER_TOKEN_001]` |
@@ -236,14 +245,22 @@ pii_llm:
 cloud_llm:
   provider: anthropic    # openai または anthropic
   model: claude-sonnet-4-6
-  # api_key: ここに書かず環境変数を使うこと
+  # api_key は環境変数 OPENAI_API_KEY / ANTHROPIC_API_KEY から読む
 
 project:
+  scan_path: ./
   exclude:               # スキャンから除外するパターン
     - .git
     - node_modules
     - __pycache__
     - "*.lock"
+    - ".venv"
+    - venv
+    - dist
+    - build
+    - "*.pyc"
+    - "*.so"
+    - "*.egg-info"
   max_file_size_kb: 100
   max_total_files: 200
 
@@ -267,28 +284,35 @@ server:
 
 ```
 coding-agent/
-├── main.py               # エントリポイント（Ollama・llama-server自動起動）
-├── config.yaml           # 設定ファイル
+├── main.py                    # エントリポイント（venv自動セットアップ・Ollama/llama-server自動起動）
+├── config.yaml                # 設定ファイル
 ├── requirements.txt
 ├── scripts/
-│   └── start_pii_server.sh  # llama-server 手動起動スクリプト
+│   └── start_pii_server.sh   # llama-server 手動起動スクリプト
 ├── src/
+│   ├── __init__.py
 │   ├── scanner/
-│   │   └── project.py    # プロジェクトスキャナ（.gitignore対応）
+│   │   ├── __init__.py
+│   │   └── project.py        # プロジェクトスキャナ（.gitignore対応）
 │   ├── selector/
-│   │   └── relevance.py  # クエリベースファイル選択（JP/EN対応）
+│   │   ├── __init__.py
+│   │   └── relevance.py      # クエリベースファイル選択（JP/EN対応）
 │   ├── masking/
-│   │   ├── patterns.py   # regexマスキングパターン定義
-│   │   └── mapper.py     # マッピングテーブル管理
+│   │   ├── __init__.py
+│   │   ├── patterns.py       # regexマスキングパターン定義（10種類）
+│   │   └── mapper.py         # マッピングテーブル管理
 │   ├── llm/
-│   │   ├── local.py      # Ollama クライアント
+│   │   ├── __init__.py
+│   │   ├── local.py          # Ollama クライアント（自動モデル検出）
 │   │   ├── pii_extractor.py  # LFM2 PIIクライアント（llama-server）
-│   │   └── cloud.py      # OpenAI / Anthropic クライアント
+│   │   └── cloud.py          # OpenAI / Anthropic クライアント（SDK不要）
 │   ├── prompt/
-│   │   └── generator.py  # プロンプト生成
+│   │   ├── __init__.py
+│   │   └── generator.py      # プロンプト生成（トークン予算管理）
 │   └── api/
-│       ├── routes.py     # FastAPI ルーター
-│       └── models.py     # API スキーマ
+│       ├── __init__.py
+│       ├── routes.py         # FastAPI ルーター
+│       └── models.py         # API スキーマ（Pydantic）
 └── web/
-    └── index.html        # Web ダッシュボード
+    └── index.html             # Web ダッシュボード
 ```
