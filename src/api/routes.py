@@ -176,7 +176,7 @@ async def preview_prompt(index: int = 0):
         masked_prompt=entry["masked_prompt"],
         estimated_tokens=entry["estimated_tokens"],
         files_included=entry["files_included"],
-        files_truncated=0,
+        files_truncated=entry.get("files_truncated", 0),
         masking_log=entry["masking_log"],
         selected_files=entry["selected_files"],
     )
@@ -202,7 +202,24 @@ async def query(req: QueryRequest):
     provider = cfg.get("cloud_llm", {}).get("provider", "openai")
 
     # クエリに関連するファイルだけを選択
-    selected_files = state.selector.select(state.index.files, req.query)
+    selected_files = state.selector.select(state.index.files, req.query, state.summarized)
+
+    # 要約がないファイルをオンデマンドで要約
+    if state.ollama and await state.ollama.is_available():
+        for f in selected_files:
+            if f.path not in state.summarized:
+                state.summarized[f.path] = await state.ollama.summarize_code(f.content)
+
+    # ファイルごとにコード全体 or 要約のどちらをAPIに渡すか判断
+    resolved_contents: dict[str, str] = {}
+    if state.ollama and await state.ollama.is_available():
+        for f in selected_files:
+            summary = state.summarized.get(f.path)
+            if summary:
+                decision = await state.ollama.decide_content_type(req.query, f.path, summary)
+                if decision == "summary":
+                    resolved_contents[f.path] = summary
+            # "code" の場合は resolved_contents に入れない → generator が llm_masked を使用
 
     # 選択されたファイルだけをマスク
     llm_masked: dict[str, str] = {}
@@ -211,6 +228,12 @@ async def query(req: QueryRequest):
     pii_enabled = pii_cfg.get("enable", True)
 
     for f in selected_files:
+        # "summary" と判断されたファイルは要約にregexマスキングのみ適用
+        if f.path in resolved_contents:
+            masked_summary, _ = state.mapper.mask(resolved_contents[f.path])
+            resolved_contents[f.path] = masked_summary
+            continue
+
         content = f.content
 
         # Ollama: APIキー・シークレット系
@@ -232,7 +255,7 @@ async def query(req: QueryRequest):
         max_context_tokens=cfg.get("max_context_tokens", 30_000),
         provider=provider,
     )
-    prompt_result = gen.generate(state.index, req.query, state.summarized, llm_masked, files=selected_files)
+    prompt_result = gen.generate(state.index, req.query, resolved_contents, llm_masked, files=selected_files)
 
     response_text = ""
     cost = None
@@ -262,6 +285,7 @@ async def query(req: QueryRequest):
         "masked_prompt": prompt_result.context,
         "estimated_tokens": prompt_result.estimated_tokens,
         "files_included": prompt_result.files_included,
+        "files_truncated": prompt_result.files_truncated,
         "selected_files": [f.path for f in selected_files],
         "masking_log": [
             {
@@ -300,6 +324,25 @@ async def masking_log():
         for e in state.mapper.entries
     ]
     return MaskingLogResponse(entries=entries, total=len(entries))
+
+
+# ---- 設定 ----
+
+@router.get("/api/settings")
+async def get_settings():
+    masking_cfg = state.config.get("masking", {})
+    return {
+        "mask_code": masking_cfg.get("mask_code", False),
+    }
+
+@router.post("/api/settings")
+async def update_settings(body: dict):
+    if "mask_code" in body:
+        state.config.setdefault("masking", {})["mask_code"] = bool(body["mask_code"])
+    masking_cfg = state.config.get("masking", {})
+    return {
+        "mask_code": masking_cfg.get("mask_code", False),
+    }
 
 
 # ---- マスキングリセット ----

@@ -85,14 +85,15 @@ def _tokenize(text: str) -> tuple[list[str], list[str]]:
     return normal, romaji_tokens
 
 
-def _score(file: ScannedFile, tokens: list[str], romaji_tokens: list[str]) -> float:
+def _score(file: ScannedFile, tokens: list[str], romaji_tokens: list[str], summarized_content: str | None = None) -> float:
     if not tokens and not romaji_tokens:
         return 0.0
 
     path_lower = file.path.lower().replace("\\", "/")
     filename = path_lower.split("/")[-1]
     path_words = re.findall(r"[a-z0-9]+", path_lower)
-    snippet = file.content[:_MAX_CONTENT_CHARS].lower()
+    base = summarized_content if summarized_content else file.content[:_MAX_CONTENT_CHARS]
+    snippet = base.lower()
 
     path_hits = 0.0
     content_hits = 0
@@ -129,7 +130,7 @@ class FileSelector:
         self.max_files = max_files
         self.min_score = min_score
 
-    def select(self, files: list[ScannedFile], query: str) -> list[ScannedFile]:
+    def select(self, files: list[ScannedFile], query: str, summarized: dict[str, str] | None = None) -> list[ScannedFile]:
         if not files:
             return []
 
@@ -137,8 +138,9 @@ class FileSelector:
         if not tokens and not romaji_tokens:
             return self._fallback(files)
 
+        summarized = summarized or {}
         scored = sorted(
-            ((f, _score(f, tokens, romaji_tokens)) for f in files),
+            ((f, _score(f, tokens, romaji_tokens, summarized.get(f.path))) for f in files),
             key=lambda x: x[1],
             reverse=True,
         )

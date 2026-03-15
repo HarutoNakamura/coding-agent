@@ -35,6 +35,18 @@ JSON配列のみ出力してください。見つからない場合は [] を返
 
 JSON:"""
 
+DECIDE_CONTENT_PROMPT = """\
+次の質問に答えるために、ファイル「{path}」の完全なコードが必要ですか？
+それとも概要説明で十分ですか？
+
+質問: {query}
+
+概要説明:
+{summary}
+
+「code」または「summary」のみ回答してください。
+回答:"""
+
 SUMMARIZE_PROMPT = """\
 以下のコードを読んで、**実装の詳細（変数名・具体的な値）を含まない**、
 機能の概要説明のみを日本語で1〜3文で書いてください。
@@ -152,6 +164,28 @@ class OllamaClient:
         except Exception as e:
             logger.warning(f"Ollama detect_secrets error: {e}")
         return []
+
+    async def decide_content_type(self, query: str, path: str, summary: str) -> str:
+        """
+        クエリに答えるためにコード全体が必要か要約で十分かを判断する。
+        Returns: "code" or "summary"
+        """
+        prompt = DECIDE_CONTENT_PROMPT.format(query=query, path=path, summary=summary)
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.0, "num_predict": 16},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(f"{self.base_url}/api/generate", json=payload)
+                resp.raise_for_status()
+                answer = resp.json().get("response", "").strip().lower()
+            return "code" if "code" in answer else "summary"
+        except Exception as e:
+            logger.warning(f"Ollama decide_content_type error: {e}")
+            return "summary"
 
     async def summarize_code(self, code: str) -> str:
         """

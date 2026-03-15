@@ -125,6 +125,41 @@
   .tree-arrow { color: var(--muted); font-size: 9px; width: 10px; flex-shrink: 0; }
   .tree-file { color: var(--muted); padding: 0 2px; }
 
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .toggle-row .toggle-label { color: var(--muted); font-size: 11px; }
+  .switch {
+    position: relative;
+    width: 32px; height: 18px;
+    flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch-track {
+    position: absolute;
+    inset: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .switch input:checked + .switch-track { background: var(--accent); border-color: var(--accent); }
+  .switch-track::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .switch input:checked + .switch-track::after { transform: translateX(14px); }
+
   #mask-log { display: flex; flex-direction: column; gap: 4px; }
   .mask-entry {
     background: var(--surface2);
@@ -344,6 +379,75 @@
     font-style: italic;
   }
 
+  /* Confirm modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: min(720px, 95vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .modal-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .modal-header h2 { font-size: 15px; font-weight: 700; flex: 1; }
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .modal-footer {
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .modal-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .file-chip-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .file-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+    color: var(--accent);
+  }
+  .modal-mask-list { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto; }
+  .modal-mask-list .mask-entry { margin: 0; }
+  .modal-prompt-pre {
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
   /* Masked token tooltip */
   .masked-token {
     position: relative;
@@ -391,6 +495,17 @@
     </div>
 
     <div>
+      <div class="panel-title">Settings</div>
+      <div class="toggle-row">
+        <span>全ファイル要約<br><span class="toggle-label">スキャン時に全ファイルをOllamaで要約</span></span>
+        <label class="switch">
+          <input type="checkbox" id="toggle-mask-code">
+          <span class="switch-track"></span>
+        </label>
+      </div>
+    </div>
+
+    <div>
       <div class="panel-title">File Tree</div>
       <div id="file-tree"><span style="color:var(--muted)">Not scanned yet</span></div>
     </div>
@@ -405,7 +520,7 @@
   <div class="content">
     <div class="tabs">
       <div class="tab active" data-tab="query">Chat</div>
-      <div class="tab" data-tab="preview">Prompt Preview</div>
+      <div class="tab" data-tab="preview">Mask Preview</div>
     </div>
 
     <!-- Chat tab -->
@@ -433,6 +548,34 @@
     </div>
   </div>
 </main>
+
+<!-- Confirmation modal -->
+<div class="modal-overlay" id="confirm-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>APIへの送信確認</h2>
+      <div id="confirm-stats" style="display:flex;gap:10px;font-size:12px;color:var(--muted)"></div>
+    </div>
+    <div class="modal-body">
+      <div>
+        <div class="modal-section-title">選択ファイル</div>
+        <div class="file-chip-list" id="confirm-files"></div>
+      </div>
+      <div id="confirm-mask-section">
+        <div class="modal-section-title">マスキング (<span id="confirm-mask-count">0</span> 件)</div>
+        <div class="modal-mask-list" id="confirm-mask-list"></div>
+      </div>
+      <div>
+        <div class="modal-section-title">プロンプト（マスク済み）</div>
+        <pre class="modal-prompt-pre" id="confirm-prompt"></pre>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="secondary" id="btn-cancel-send">キャンセル</button>
+      <button id="btn-confirm-send">送信する</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const API = '';  // same origin
@@ -511,25 +654,111 @@ document.getElementById('btn-scan').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('btn-send').addEventListener('click', () => sendQuery(true));
+document.getElementById('btn-send').addEventListener('click', () => startSendFlow());
+document.getElementById('btn-cancel-send').addEventListener('click', closeConfirmModal);
+document.getElementById('confirm-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('confirm-overlay')) closeConfirmModal();
+});
 
-async function sendQuery(sendToCloud) {
+let _pendingQuery = '';
+
+async function startSendFlow() {
   const queryInput = document.getElementById('query-input');
   const query = queryInput.value.trim();
   if (!query) return;
-  queryInput.value = '';
 
+  const btn = document.getElementById('btn-send');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Preparing...';
+
+  try {
+    // プレビュー取得（クラウドには送らない）
+    const r = await fetch('/api/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, send_to_cloud: false }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      alert('Error: ' + err.detail);
+      return;
+    }
+    const d = await r.json();
+    _pendingQuery = query;
+    showConfirmModal(query, d);
+  } catch(e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+function showConfirmModal(query, preview) {
+  // 統計
+  document.getElementById('confirm-stats').innerHTML =
+    `<span>Tokens: <b style="color:var(--text)">${preview.estimated_tokens}</b></span>` +
+    `<span>Files: <b style="color:var(--text)">${(preview.selected_files || []).length}</b></span>` +
+    `<span>Masked: <b style="color:var(--warn)">${preview.masking_count}</b></span>`;
+
+  // 選択ファイル
+  const filesEl = document.getElementById('confirm-files');
+  filesEl.innerHTML = (preview.selected_files || []).map(f =>
+    `<span class="file-chip">${escapeHtml(f)}</span>`
+  ).join('') || '<span style="color:var(--muted);font-size:11px">なし</span>';
+
+  // マスキングログ取得 + プロンプトのハイライト描画
+  const promptText = preview.response.replace(/^\[Preview only.*?\]\n\n/s, '');
+  fetch('/api/masking/log').then(r => r.json()).then(d => {
+    document.getElementById('confirm-mask-count').textContent = d.total;
+    const list = document.getElementById('confirm-mask-list');
+    if (d.total === 0) {
+      list.innerHTML = '<span style="color:var(--muted);font-size:11px">マスクなし</span>';
+    } else {
+      list.innerHTML = d.entries.map(e => `
+        <div class="mask-entry">
+          <span class="mask-token">${escapeHtml(e.token)}</span>
+          <span class="mask-pattern"> [${e.pattern_name}]</span>
+          <span style="color:var(--muted)"> ${escapeHtml(e.preview)}</span>
+        </div>`).join('');
+    }
+    // masking_log形式に変換してハイライト適用
+    const maskingLog = d.entries.map(e => ({ token: e.token, original: e.preview }));
+    document.getElementById('confirm-prompt').innerHTML = highlightMasked(promptText, maskingLog);
+  }).catch(() => {
+    document.getElementById('confirm-prompt').textContent = promptText;
+  });
+
+  // 送信ボタンにハンドラをセット（重複登録防止のためcloneで差し替え）
+  const oldBtn = document.getElementById('btn-confirm-send');
+  const newBtn = oldBtn.cloneNode(true);
+  oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+  newBtn.addEventListener('click', () => {
+    closeConfirmModal();
+    sendQuery(_pendingQuery);
+  });
+
+  document.getElementById('confirm-overlay').classList.add('open');
+}
+
+function closeConfirmModal() {
+  document.getElementById('confirm-overlay').classList.remove('open');
+}
+
+async function sendQuery(query) {
   const area = document.getElementById('response-area');
   const emptyState = area.querySelector('.empty-state');
   if (emptyState) emptyState.remove();
 
-  // Add user message
+  document.getElementById('query-input').value = '';
+
+  // ユーザーメッセージ追加
   const userMsg = document.createElement('div');
   userMsg.className = 'message user';
   userMsg.innerHTML = `<div class="role">You</div>${escapeHtml(query)}`;
   area.appendChild(userMsg);
 
-  // Loading
+  // ローディング
   const loadMsg = document.createElement('div');
   loadMsg.className = 'message assistant';
   loadMsg.innerHTML = `<div class="role">Agent</div><span class="spinner"></span> Thinking...`;
@@ -543,7 +772,7 @@ async function sendQuery(sendToCloud) {
     const r = await fetch('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, send_to_cloud: sendToCloud }),
+      body: JSON.stringify({ query, send_to_cloud: true }),
     });
 
     if (!r.ok) {
@@ -564,7 +793,6 @@ async function sendQuery(sendToCloud) {
       <div class="meta">${meta}</div>
     `;
     updateMaskLog();
-    // Previewタブが開いていれば最新プロンプトに更新
     if (document.querySelector('.tab[data-tab="preview"]').classList.contains('active')) {
       fetchPreview(0);
     } else {
@@ -794,8 +1022,30 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ---- Settings ----
+
+async function fetchSettings() {
+  try {
+    const d = await fetch('/api/settings').then(r => r.json());
+    document.getElementById('toggle-mask-code').checked = d.mask_code;
+  } catch(e) {}
+}
+
+document.getElementById('toggle-mask-code').addEventListener('change', async e => {
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mask_code: e.target.checked }),
+    });
+  } catch(err) {
+    e.target.checked = !e.target.checked; // 失敗時は戻す
+  }
+});
+
 // Init
 fetchStatus();
+fetchSettings();
 setInterval(fetchStatus, 10000);
 </script>
 </body>

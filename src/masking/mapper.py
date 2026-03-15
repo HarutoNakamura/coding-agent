@@ -54,16 +54,23 @@ class MaskMapper:
         applied: list[MaskEntry] = []
         result = text
 
+        _already_masked = re.compile(r'^\[[A-Z][A-Z0-9_]*_\d{3}\]$')
+
         for mp in PATTERNS:
             def replacer(m: re.Match, _mp: MaskPattern = mp) -> str:
                 # グループがあれば最後のグループ、なければマッチ全体を秘匿対象とする
                 if m.lastindex and m.lastindex >= 1:
                     sensitive = m.group(m.lastindex)
+                    # 既にマスク済みトークンなら再マスクしない
+                    if _already_masked.match(sensitive):
+                        return m.group(0)
                     token = self._register(sensitive, _mp.label_prefix, _mp.name)
                     # グループ部分のみ置換（前後の固定部分は保持）
                     return m.group(0).replace(sensitive, token)
                 else:
                     sensitive = m.group(0)
+                    if _already_masked.match(sensitive):
+                        return m.group(0)
                     token = self._register(sensitive, _mp.label_prefix, _mp.name)
                     return token
 
